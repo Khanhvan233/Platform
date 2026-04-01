@@ -1,0 +1,176 @@
+using UnityEditor;
+using UnityEngine;
+
+public class GridMap : EditorWindow
+{
+    // ===== CELL =====
+    class Cell
+    {
+        public bool visited = false;
+        public bool[] walls = { true, true, true, true };
+        // 0: Top, 1: Right, 2: Bottom, 3: Left
+    }
+
+    private Cell[,] grid;
+    private System.Random rand = new System.Random();
+
+    // ===== SETTINGS =====
+    public static int mazeWidth = 10;
+    public static int mazeHeight = 10;
+
+    public GameObject wallPrefab;
+    public Transform parent;
+    public float cellSize = 10f;
+
+    [MenuItem("Tools/Grid Map Editor")]
+    public static void ShowWindow()
+    {
+        GetWindow<GridMap>("Maze Generator");
+    }
+
+    private void OnGUI()
+    {
+        GUILayout.Label("Maze Settings", EditorStyles.boldLabel);
+
+        mazeWidth = EditorGUILayout.IntField("Width", mazeWidth);
+        mazeHeight = EditorGUILayout.IntField("Height", mazeHeight);
+
+        cellSize = EditorGUILayout.FloatField("Cell Size", cellSize);
+
+        wallPrefab = (GameObject)EditorGUILayout.ObjectField("Wall Prefab", wallPrefab, typeof(GameObject), false);
+        parent = (Transform)EditorGUILayout.ObjectField("Parent", parent, typeof(Transform), true);
+
+        if (GUILayout.Button("Generate Maze In Scene"))
+        {
+            GenerateMaze(mazeWidth, mazeHeight);
+            DrawMazeInScene();
+        }
+    }
+
+    // ===== MAZE GENERATION (DFS) =====
+    void GenerateMaze(int width, int height)
+    {
+        grid = new Cell[width, height];
+
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+                grid[x, y] = new Cell();
+
+        DFS(0, 0);
+
+        // mở cửa vào/ra
+        grid[0, 0].walls[3] = false;
+        grid[width - 1, height - 1].walls[1] = false;
+    }
+
+    void DFS(int x, int y)
+    {
+        grid[x, y].visited = true;
+
+        int[] dirs = { 0, 1, 2, 3 };
+        Shuffle(dirs);
+
+        foreach (int dir in dirs)
+        {
+            int nx = x, ny = y;
+
+            switch (dir)
+            {
+                case 0: ny = y + 1; break; // Top
+                case 1: nx = x + 1; break; // Right
+                case 2: ny = y - 1; break; // Bottom
+                case 3: nx = x - 1; break; // Left
+            }
+
+            if (nx >= 0 && ny >= 0 && nx < mazeWidth && ny < mazeHeight && !grid[nx, ny].visited)
+            {
+                grid[x, y].walls[dir] = false;
+                grid[nx, ny].walls[(dir + 2) % 4] = false;
+
+                DFS(nx, ny);
+            }
+        }
+    }
+
+    void Shuffle(int[] array)
+    {
+        for (int i = array.Length - 1; i > 0; i--)
+        {
+            int j = rand.Next(i + 1);
+            (array[i], array[j]) = (array[j], array[i]);
+        }
+    }
+
+    // ===== DRAW TO SCENE =====
+    void DrawMazeInScene()
+    {
+        if (wallPrefab == null)
+        {
+            Debug.LogWarning("Missing Wall Prefab!");
+            return;
+        }
+
+        // clear cũ
+        if (parent != null)
+        {
+            for (int i = parent.childCount - 1; i >= 0; i--)
+            {
+                DestroyImmediate(parent.GetChild(i).gameObject);
+            }
+        }
+
+        float half = cellSize / 2f;
+
+        for (int x = 0; x < mazeWidth; x++)
+        {
+            for (int y = 0; y < mazeHeight; y++)
+            {
+                Vector3 basePos = new Vector3(x * cellSize, 0, y * cellSize);
+                var cell = grid[x, y];
+
+                // 🔥 CHỈ vẽ Top + Right (tránh double wall)
+
+                // Top
+                if (cell.walls[0])
+                    CreateWall(
+                        basePos + new Vector3(0, 0, half),
+                        Quaternion.identity
+                    );
+
+                // Right
+                if (cell.walls[1])
+                    CreateWall(
+                        basePos + new Vector3(half, 0, 0),
+                        Quaternion.Euler(0, 90, 0)
+                    );
+
+                // viền ngoài (để không bị hở)
+                if (y == 0 && cell.walls[2]) // Bottom edge
+                    CreateWall(
+                        basePos + new Vector3(0, 0, -half),
+                        Quaternion.identity
+                    );
+
+                if (x == 0 && cell.walls[3]) // Left edge
+                    CreateWall(
+                        basePos + new Vector3(-half, 0, 0),
+                        Quaternion.Euler(0, 90, 0)
+                    );
+            }
+        }
+    }
+
+    void CreateWall(Vector3 pos, Quaternion rot)
+    {
+        GameObject wall = (GameObject)PrefabUtility.InstantiatePrefab(wallPrefab);
+
+        wall.transform.position = pos;
+        wall.transform.rotation = rot;
+
+        // 🔥 scale lại từ cube thành tường
+        wall.transform.localScale = new Vector3(cellSize, cellSize, 1f);
+
+        if (parent != null)
+            wall.transform.SetParent(parent);
+    }
+}
